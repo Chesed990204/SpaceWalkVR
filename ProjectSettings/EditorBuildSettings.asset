@@ -6,12 +6,10 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/Chaye/Scenes/00_Menu.unity
-    guid: 358a90cdf1fa9f94cbbc05d4d77dbfc5
-  - enabled: 1
-    path: Assets/Chaye/Scenes/01_OuterSpace.unity
-    guid: 0e8261565001df04892c0c4d57d2090f
-  - enabled: 1
-    path: Assets/Chaye/Scenes/02_InTheHome.unity
-    guid: 7816c573934199945aa13c25a8420ecd
-  m_configObjects: {}
+    path: Assets/Scenes/SpaceWalkVR.unity
+    guid: 2f4acc7855fa78a4494e027acd32df58
+  m_configObjects:
+    Unity.XR.Oculus.Settings: {fileID: 11400000, guid: 51c0a021a69d2cb4ba81b4ab0674e349,
+      type: 2}
+    com.unity.xr.management.loader_settings: {fileID: 11400000, guid: 24cd3e1339f9ab24aa27728c14c6e743,
+      type: 2}
