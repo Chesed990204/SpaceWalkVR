@@ -13,3 +13,12 @@ B.  Enable rope and anchor, constraining character to move around only in certai
 C.  Go back to previous location by rewinding rope. 
 
 You can shift your state by long pressing trigger button.
+
+![image](https://github.com/Chesed990204/SpaceWalkVR/assets/45059838/717bf525-3384-4892-a5a1-e2beca3908f4)
+![image](https://github.com/Chesed990204/SpaceWalkVR/assets/45059838/868a53b7-4754-495a-8c8c-d7125d6ef303)
+![image](https://github.com/Chesed990204/SpaceWalkVR/assets/45059838/2a1be1dc-a0aa-4256-9797-007d16a1133f)
+
+https://www.youtube.com/watch?v=bwZ8RYF5Blk
+
+made with Unity 2022.3.22
+made for Oculus Quest
