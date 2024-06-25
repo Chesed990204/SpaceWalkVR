@@ -12,7 +12,7 @@ namespace Obi
             set;
         }
 
-        float bendCompliance
+        public float bendCompliance
         {
             get;
             set;

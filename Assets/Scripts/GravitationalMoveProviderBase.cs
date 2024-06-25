@@ -1,8 +1,16 @@
+using System;
 using System.Collections.Generic;
 using System.Numerics;
+using IdlessChaye.IdleToolkit.AVGEngine;
 using UnityEngine.Assertions;
 using UnityEngine.XR;
+using Obi;
+using UnityEngine.UIElements;
+using UnityEngine.TextCore.LowLevel;
+using UnityEditor.MemoryProfiler;
+using Unity.XR.CoreUtils;
 namespace UnityEngine.XR.Interaction.Toolkit
+
 {
 
     public abstract class GravitationalMoveProviderBase : LocomotionProvider
@@ -11,6 +19,12 @@ namespace UnityEngine.XR.Interaction.Toolkit
         {
             AttemptingMove,
             Immediately,
+        }
+
+        public enum State{
+            Free,
+            Rope,
+            Stop
         }
 
         [SerializeField]
@@ -22,7 +36,15 @@ namespace UnityEngine.XR.Interaction.Toolkit
             set => m_MoveSpeed = value;
         }
 
+        public GameObject Rope;
 
+        public State currentState=State.Free;
+
+        public bool isLongPressed_L=false;
+        public bool isLongPressed_R=false;
+
+
+        public bool isLongPressed_Grip=false;
 
         [SerializeField]
         [Tooltip("The source Transform to define the forward direction.")]
@@ -42,10 +64,11 @@ namespace UnityEngine.XR.Interaction.Toolkit
             set => m_ForwardSource_L = value;
         }
 
+
         public float gravitational_force_L = 0.0f;
         public float gravitational_force_R = 0.0f;
 
-        List<float> gravitaional_force_queue;
+        List<Vector3> gravitaional_force_queue ;
 
 
 
@@ -57,35 +80,89 @@ namespace UnityEngine.XR.Interaction.Toolkit
 
         Vector3 m_VerticalVelocity;
 
-        public GameObject XROrigin;
-        private UnityEngine.XR.Interaction.Toolkit.ValueMonitoring m_VM;
+        ObiRope rope;
 
-        // void Start()
-        // {
-        //     m_VM = XROrigin.GetComponent<ValueMonitoring>();
-        // }
+        public GameObject solver;
 
+        public GameObject thruster_L;
+        public GameObject thruster_R;
+        public GameObject thruster_result;
 
+        public GameObject left_controller;
+        public GameObject right_controller;
+        XRRayInteractor left_ray;
+        XRRayInteractor right_ray;
+
+        ObiParticleAttachment ropeAttach;
+
+        ObiRopeExtrudedRenderer rope_renderer;
+
+        public GameObject anchor;
+       
+        
+        void Start(){
+            rope = Rope.GetComponent<ObiRope>();
+            ropeAttach = Rope.GetComponent<ObiParticleAttachment>();
+            left_ray=left_controller.GetComponent<XRRayInteractor>();
+            right_ray=right_controller.GetComponent<XRRayInteractor>();
+            rope_renderer = Rope.GetComponent<ObiRopeExtrudedRenderer>();
+            gravitaional_force_queue=new List<Vector3>();
+            
+        }
         protected void Update()
         {
-            m_IsMovingXROrigin = false;
-            AccumulateRotation(m_ForwardSource_R);
-            AccumulateRotation(m_ForwardSource_L);
+            //Debug.Log("Left Ray: "+left_ray.rayOriginTransform.rotation);
+            //Debug.Log("Right Ray: "+right_ray.rayOriginTransform.rotation);
 
+        
+            
+            m_IsMovingXROrigin = false;
             var xrOrigin = system.xrOrigin?.Origin;
+            
             if (xrOrigin == null)
                 return;
 
             var input_L = ReadInput_L();
             var input_R = ReadInput_R();
             var translationInWorldSpace = ComputeDesiredMove(input_L, input_R);
+            
+            if(gravitaional_force_queue.Count>10000){gravitaional_force_queue.RemoveAt(0);}
+            gravitaional_force_queue.Add(xrOrigin.transform.position);
 
-            // Debug.Log("Button X:"+m_VM.button_X_L);
-            // Debug.Log("Button Y:"+m_VM.button_Y_L);
-            // Debug.Log("Button A:"+m_VM.button_A_R);
-            // Debug.Log("Button B:"+m_VM.button_B_R);
+            Vector3 result=Vector3.one;
+            result.x= translationInWorldSpace.magnitude*100;
+            thruster_result.transform.localScale = result;
+            thruster_result.transform.forward = Quaternion.AngleAxis(90,Vector3.up)*translationInWorldSpace.normalized;
 
-            MoveRig(translationInWorldSpace);
+            
+            if(currentState!=State.Free){
+                ropeAttach.compliance=0;
+                rope.stretchCompliance=0;
+                rope_renderer.thicknessScale = 0.5f;
+                }
+            else{
+                 ropeAttach.compliance=1;
+                 rope.stretchCompliance=1;
+                 rope_renderer.thicknessScale = 0.0f;
+            }
+            
+           
+           if(currentState!=State.Stop){
+                rope.bendCompliance=1;
+                MoveRig(translationInWorldSpace);
+                
+           }
+
+           else{
+            Rigidbody rb = xrOrigin.GetComponent<Rigidbody>();
+            rb.constraints = RigidbodyConstraints.FreezeAll;
+            ropeAttach.compliance=1;
+            rope.bendCompliance=0;
+            rope.DeactivateParticle(0);
+            translationInWorldSpace=Vector3.zero;
+             m_IsMovingXROrigin = false;
+           }
+            
 
             switch (locomotionPhase)
             {
@@ -110,36 +187,31 @@ namespace UnityEngine.XR.Interaction.Toolkit
         protected abstract Vector2 ReadInput_L();
         protected abstract Vector2 ReadInput_R();
 
-        Quaternion accumulatedRotation = Quaternion.identity;
 
-        void AccumulateRotation(Transform forwardSource)
-        {
-            if (forwardSource == null)
-                return;
-
+        void reverseTrajectory(){
+            var xrOrigin = system.xrOrigin;
+            
             List<InputDevice> devices = new List<InputDevice>();
-            InputDeviceCharacteristics controllerCharacteristics = forwardSource == m_ForwardSource_R ?
-                InputDeviceCharacteristics.Right | InputDeviceCharacteristics.Controller :
-                InputDeviceCharacteristics.Left | InputDeviceCharacteristics.Controller;
-
-            InputDevices.GetDevicesWithCharacteristics(controllerCharacteristics, devices);
-
-            foreach (var device in devices)
+            InputDeviceCharacteristics rightControllerCharacteristics = InputDeviceCharacteristics.Right | InputDeviceCharacteristics.Controller;
+            InputDevices.GetDevicesWithCharacteristics(rightControllerCharacteristics, devices);
+            foreach (var item in devices)
             {
-                // Read input values and accumulate rotations
-                Quaternion deviceRotation=Quaternion.identity;
-                
-                if (device.TryGetFeatureValue(CommonUsages.primary2DAxis, out Vector2 input))
-                {
-                    float turnedAmount=input.magnitude * (Mathf.Sign(input.x) * 100f * Time.deltaTime);
-                    deviceRotation *= Quaternion.AngleAxis(turnedAmount,XROrigin.transform.up);
-                    accumulatedRotation *= deviceRotation;
-                }
-
-                // Other input reading and rotation accumulation code...
+                item.TryGetFeatureValue(CommonUsages.gripButton, out bool grip_R);
+                bool isReversing=grip_R;
+                while(isReversing && gravitaional_force_queue.Count>0){ 
+                    item.TryGetFeatureValue(CommonUsages.gripButton, out bool b);
+                    isReversing=b;
+                    xrOrigin.transform.position =gravitaional_force_queue[gravitaional_force_queue.Count-1];
+                    item.SendHapticImpulse(0u, 0.7f,0.05f);
+                    gravitaional_force_queue.RemoveAt(gravitaional_force_queue.Count-1);
+            }
             }
         }
-        protected virtual Vector3 ComputeDesiredMove(Vector2 input_L, Vector2 input_R)
+
+        void Delay(){Debug.Log("Delay");}
+
+       
+        public virtual Vector3 ComputeDesiredMove(Vector2 input_L, Vector2 input_R)
         {
 
             // if (input_L == Vector2.zero)
@@ -149,24 +221,38 @@ namespace UnityEngine.XR.Interaction.Toolkit
             if (xrOrigin == null)
                 return Vector3.zero;
 
-            // Implementation: Get Right Controller Orientation 
+            
             List<InputDevice> devices = new List<InputDevice>();
             InputDeviceCharacteristics rightControllerCharacteristics = InputDeviceCharacteristics.Right | InputDeviceCharacteristics.Controller;
             InputDevices.GetDevicesWithCharacteristics(rightControllerCharacteristics, devices);
             foreach (var item in devices)
             {
+                if(isLongPressed_R){
+                item.SendHapticImpulse(0u, 0.7f,1f);
+                isLongPressed_R=false;
+                }
                 item.TryGetFeatureValue(CommonUsages.deviceRotation, out Quaternion quaternion);
-                Debug.Log("right rotation: " + quaternion);
-                //m_ForwardSource_R.rotation = quaternion * turned;
-                item.TryGetFeatureValue(CommonUsages.primary2DAxis, out Vector2 m_joystick_R);
-                //turnedAmount += m_joystick_R.magnitude * (Mathf.Sign(m_joystick_R.x) * 60f * Time.deltaTime);
-                //turned *= Quaternion.AngleAxis(turnedAmount, xrOrigin.transform.up);
-
-                gravitational_force_R += m_joystick_R.y;
-                Debug.Log("gravity_R:" + gravitational_force_R);
+                ForwardSource_R.forward = quaternion*ForwardSource_R.forward;
+                thruster_R.transform.forward = Quaternion.AngleAxis(270,Vector3.up)*right_ray.rayOriginTransform.forward;
                 
+                item.TryGetFeatureValue(CommonUsages.primary2DAxis, out Vector2 m_joystick_R);                
+                if(Mathf.Abs(m_joystick_R.y)>Mathf.Abs(m_joystick_R.x)){gravitational_force_R += m_joystick_R.y;}
+                item.TryGetFeatureValue(CommonUsages.triggerButton, out bool trigger_R);
+               
+                Vector3 thrust_scale = Vector3.one;
+                thrust_scale.x = gravitational_force_R*10;
+                thruster_R.transform.localScale = -thrust_scale;
+                item.TryGetFeatureValue(CommonUsages.primaryButton, out bool button_X);
+                if(button_X&& rope.stretchCompliance<10){rope.stretchingScale+=0.1f;}
+                item.TryGetFeatureValue(CommonUsages.secondaryButton, out bool button_Y);
+                if(button_Y&& rope.stretchCompliance>0){rope.stretchingScale-=0.1f;}   
+                item.TryGetFeatureValue(CommonUsages.gripButton, out bool grip_R);
+                if(grip_R&&currentState==State.Rope){
+                    Invoke("reverseTrajectory",2.0f);
+                }
+                
+           
             }
-
 
             // Implementation: Get Left Controller Orientation 
             InputDeviceCharacteristics leftControllerCharacteristics = InputDeviceCharacteristics.Left | InputDeviceCharacteristics.Controller;
@@ -174,20 +260,47 @@ namespace UnityEngine.XR.Interaction.Toolkit
 
             foreach (var item in devices)
             {
+                if(isLongPressed_L){
+                item.SendHapticImpulse(0u, 0.7f,1f);
+                isLongPressed_L=false;
+                ///// 여기에 field 크기 바꾸는 코드
+                
+                }
                 item.TryGetFeatureValue(CommonUsages.deviceRotation, out Quaternion quaternion);
-                Debug.Log("left rotation: " + quaternion);
-               // m_ForwardSource_L.rotation = quaternion * turned;
+                ForwardSource_L.forward = quaternion*ForwardSource_L.forward;
+                thruster_L.transform.forward = Quaternion.AngleAxis(-90,Vector3.up)*left_ray.rayOriginTransform.forward;
+
                 item.TryGetFeatureValue(CommonUsages.primary2DAxis, out Vector2 m_joystick_L);
-                //turnedAmount += m_joystick_L.magnitude * (Mathf.Sign(m_joystick_L.x) * 60f * Time.deltaTime);
-                //turned *= Quaternion.AngleAxis(turnedAmount, xrOrigin.transform.up);
-                    gravitational_force_L += m_joystick_L.y;
-                    Debug.Log("gravity_L:" + gravitational_force_L);
+                if(Mathf.Abs(m_joystick_L.y)>Mathf.Abs(m_joystick_L.x)){gravitational_force_L += m_joystick_L.y;}
+                Vector3 thrust_scale = Vector3.one;
+                thrust_scale.x = gravitational_force_R*10;
+                thruster_L.transform.localScale = -thrust_scale;
+                item.TryGetFeatureValue(CommonUsages.triggerButton, out bool trigger_L);
+                // if(trigger_L){field_renderer.enabled=true;}
+                // else{field_renderer.enabled=false;}
+                item.TryGetFeatureValue(CommonUsages.primaryButton, out bool button_A);
+                if(button_A &&rope.bendCompliance<10){rope.stretchingScale+=0.1f;}
+                item.TryGetFeatureValue(CommonUsages.secondaryButton, out bool button_B);
+                if(button_B&& rope.bendCompliance>0){rope.stretchingScale-=0.1f;}
+                item.TryGetFeatureValue(CommonUsages.gripButton, out bool grip_L);
+                // if(grip_L){ 
+                //     field_renderer.enabled=true;
+                //     field.transform.localScale=Vector3.one*rope.CalculateLength()*rope.stretchingScale*180;
+                // }
+                // else{
+                //     field_renderer.enabled=false;
+                // }   
             }
+
+
 
             var inputMove_R = Vector3.ClampMagnitude(new Vector3(0f, 0f, 1), 1f);
             var inputMove_L = Vector3.ClampMagnitude(new Vector3(0f, 0f, 1), 1f);
 
-            // Determine frame of reference for what the input direction is relative to
+            //Debug.Log("Left Forward Source:" + m_ForwardSource_L.forward);
+            //Debug.Log("Right Forward Source:" + m_ForwardSource_R.forward);
+
+            // Determine frame of reference for what the input direction is relative to    
             var forwardSourceTransform_R = m_ForwardSource_R == null ? xrOrigin.Camera.transform : m_ForwardSource_R;
             var inputForwardInWorldSpace_R = forwardSourceTransform_R.forward;
 
@@ -212,12 +325,15 @@ namespace UnityEngine.XR.Interaction.Toolkit
             var inputForwardProjectedInWorldSpace_L = Vector3.ProjectOnPlane(inputForwardInWorldSpace_L, originUp);
             var forwardRotation_R = Quaternion.FromToRotation(originTransform.forward, inputForwardProjectedInWorldSpace_R);
             var forwardRotation_L = Quaternion.FromToRotation(originTransform.forward, inputForwardProjectedInWorldSpace_L);
+            
 
-            var translationInRigSpace_R = forwardRotation_R * inputMove_R * speedFactor * gravitational_force_R;
-            var translationInRigSpace_L = forwardRotation_L * inputMove_L * speedFactor * gravitational_force_L;
-            Debug.Log("Left Movement:" + translationInRigSpace_L+"mag:"+translationInRigSpace_L.magnitude);
-            Debug.Log("Right Movement:" + translationInRigSpace_R+"mag:"+translationInRigSpace_R.magnitude);
-            var translationInWorldSpace = originTransform.TransformDirection(translationInRigSpace_R + translationInRigSpace_L);
+            var translationInRigSpace = forwardRotation_R * inputMove_R * speedFactor * gravitational_force_R+forwardRotation_L * inputMove_L * speedFactor * gravitational_force_L;
+        
+            var translationInWorldSpace = originTransform.TransformDirection(translationInRigSpace);
+
+            
+            
+            
 
             return translationInWorldSpace;
         }

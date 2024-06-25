@@ -56,5 +56,5 @@
         "temp/": true,
         "Temp/": true
     },
-    "dotnet.defaultSolution": "VRStory_TheSpaceWalk.sln"
+    "dotnet.defaultSolution": "SpaceWalkVRLocomotion.sln"
 }

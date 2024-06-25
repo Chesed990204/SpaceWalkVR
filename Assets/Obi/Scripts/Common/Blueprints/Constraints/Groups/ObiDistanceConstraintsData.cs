@@ -18,7 +18,7 @@ namespace Obi
             set;
         }
 
-        float stretchCompliance
+        public float stretchCompliance
         {
             get;
             set;
